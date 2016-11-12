@@ -1,0 +1,18 @@
+%% -*- mode: erlang -*-
+{application, backbeat,
+ [{description,
+   "an integrated synth and sequencer for offline composition"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {backbeat_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {contributors, ["evan vigil-mcclanahan <mcclanahan@gmail.com>"]},
+  {licenses, ["GPLv3"]},
+  {links, []}
+ ]}.

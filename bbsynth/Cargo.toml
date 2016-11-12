@@ -1,0 +1,15 @@
+[package]
+name = "bbsynth"
+version = "0.1.0"
+authors = ["Evan Vigil-McClanahan <mcclanahan@gmail.com>"]
+
+[lib]
+name = "bbsynth"
+path = "src/lib.rs"
+crate-type = ["dylib"]
+
+[dependencies]
+rustler = { git = 'https://github.com/evanmcc/rustler' }
+rustler_codegen = { git = 'https://github.com/evanmcc/rustler' }
+portaudio = "0.7.0"
+lazy_static = "0.1.16"
