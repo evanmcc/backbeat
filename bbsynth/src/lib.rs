@@ -1,44 +1,52 @@
 // entrypoint for the bb_nif module
 
 #![feature(plugin)]
+#![feature(custom_attribute)]
 #![plugin(rustler_codegen)]
 
 #[macro_use]
 extern crate rustler;
 extern crate portaudio;
-#[macro_use]
-extern crate lazy_static;
 
 use rustler::{ atom, NifEnv, NifTerm, NifResult, NifEncoder };
+use rustler::resource::ResourceCell;
 use portaudio as pa;
-use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::thread;
+use std::sync::mpsc::{channel, Sender};
+use std::time;
 
-const SAMPLE_RATE: f64 = 44_100.0;
+mod synth;
+
+use synth::{Synth};
+//abstract this away? please?
+use synth::SourceGraph::*;
+use synth::Waveform::*;
+
+const SAMPLE_HZ: f64 = 44_100.0;
 const CHANNELS: i32 = 2;
-const FRAMES: u32 = 256;
-const INTERLEAVED: bool = true;
+const FRAMES: u32 = 128;
 
-lazy_static! {
-    static ref CHANNEL: Mutex<VecDeque<SynthMsg>> =
-        Mutex::new(VecDeque::new());
-
+#[NifResource]
+struct Resource {
+    sender: Sender<SynthMsg>
 }
 
 rustler_export_nifs!(
-    "bb_nif",
+    "bbsynth",
     [
-        ("play_note", 3, play_note),
-        ("terminate", 0, terminate)
+        ("init_resources", 0, init_resources),
+        ("play_note", 5, play_note),
+        ("terminate", 1, terminate)
     ],
     Some(on_load)
 );
 
 enum SynthMsg {
     Note {
-        duration: usize, // in samples
-        pitch: usize, // in Hz
+        // instrument
+        start: u64, // sample position
+        duration: u64, // in samples
+        pitch: f32 // in Hz
     },
     Exit
 }
@@ -46,91 +54,89 @@ enum SynthMsg {
 use SynthMsg::*;
 
 fn play_note<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
-    Ok((1).encode(env))
+    let res: ResourceCell<Resource> = args[0].decode()?;
+    let send = res.read().unwrap().sender.clone();
+
+    // ignore instrument for now
+    let start: u64 = args[2].decode()?;
+    let pitch: f32 = args[3].decode()?;
+    let duration: u64 = args[4].decode()?;
+    send.send(Note { start: start, pitch: pitch, duration: duration });
+    Ok(atom::get_atom_init("ok").to_term(env))
 }
 
 fn terminate<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
-    let mut queue = CHANNEL.lock().unwrap();
-    queue.push_front(Exit);
+    let res: ResourceCell<Resource> = args[0].decode()?;
+    let send = res.read().unwrap().sender.clone();
+    send.send(Exit);
     Ok(atom::get_atom_init("ok").to_term(env))
 }
 
 fn on_load(env: &NifEnv, load_info: NifTerm) -> bool {
-    // println!("{:#?}", load_info.decode());
-
-    thread::spawn(
-        move|| {
-
-            let pa = pa::PortAudio::new().unwrap();
-
-            println!("PortAudio init");
-            println!("\tversion: {}", pa.version());
-            println!("\tversion text: {:?}", pa.version_text());
-            println!("\thost count: {}", pa.host_api_count().unwrap());
-
-            let host = pa.default_host_api().unwrap();
-            println!("\thost: {:#?}\n", pa.host_api_info(host));
-
-            let output = pa.default_output_device().unwrap();
-            let output_info = pa.device_info(output).unwrap();
-            println!("Default output device info: {:#?}", &output_info);
-
-            // Construct the output stream parameters.
-            let latency = output_info.default_low_output_latency;
-            let params = pa::StreamParameters::<f32>::new(output, CHANNELS, INTERLEAVED, latency);
-
-            // Check that the stream format is supported.
-            pa.is_output_format_supported(params, SAMPLE_RATE).unwrap();
-
-            let settings = pa::OutputStreamSettings::new(params, SAMPLE_RATE, FRAMES);
-            let mut current_sample = 0;
-
-            let mut stream = pa.open_blocking_stream(settings).unwrap();
-            stream.start().unwrap();
-            let mut queue = CHANNEL.lock().unwrap();
-
-            'main: loop {
-                // get our available frames
-                let frames = handle_stream(|| stream.write_available());
-
-                // get any messages that might be waiting, but not too many
-                let mut limit = 100;
-                while let Some(msg) = queue.pop_back() {
-                    match msg {
-                        Note {..} => {},
-                        Exit => break 'main
-                    }
-
-                    limit -= 1;
-                    if limit == 0 {
-                        break;
-                    }
-                }
-                // write samples
-                for _ in 0..frames {
-                    
-                    current_sample += 1;
-                }
-            }
-        });
+    resource_struct_init!(Resource, env);
     true
 }
 
-fn handle_stream<F>(f: F) -> usize
-    where F: Fn() -> Result<pa::StreamAvailable, pa::error::Error>
-{
-    match f() {
-        Ok(avail) => {
-            match avail {
-                pa::StreamAvailable::Frames(frames) => frames as usize,
-                //shouldn't be possible?
-                pa::StreamAvailable::InputOverflowed => 0,
-                pa::StreamAvailable::OutputUnderflowed => {
-                    println!("underflow");
-                    0
+fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
+    let (tx, rx) = channel::<SynthMsg>();
+    let res = ResourceCell::new(Resource {
+        sender: tx
+    });
+
+
+    let mut synth = Synth::new();
+
+    let callback =
+        move|pa::OutputStreamCallbackArgs { buffer, frames, .. }| {
+
+            // get any messages that might be waiting, but not too many
+            let mut limit = 100;
+            let mut exit = false;
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    Note { start, duration, pitch } => {
+                        let sound: synth::Sound =
+                            synth::Sound::new(start, duration,
+                                              Osc{ waveform: Sine,
+                                                   frequency: pitch as f64,
+                                                   phase: 0.0
+                                              });
+                        synth.add_sound(sound)
+                    },
+                    Exit => exit = true
+                }
+
+                limit -= 1;
+                if limit == 0 {
+                    break;
                 }
             }
-        },
-        Err(error) => panic!("output stream error: {}", error)
-    }
+            // write samples
+            for i in 0..frames {
+                let idx = i * 2;
+                let (l, r) = synth.sample();
+                buffer[idx] = l;
+                buffer[idx+1] = r;
+            }
+            if !exit {
+                pa::Continue
+            } else {
+                pa::Complete
+            }
+        };
+    thread::spawn(move || {
+        let pa = pa::PortAudio::new().unwrap();
+        let settings = pa.default_output_stream_settings::<f32>(CHANNELS,
+                                                                SAMPLE_HZ,
+                                                                FRAMES).unwrap();
+        let mut stream = pa.open_non_blocking_stream(settings, callback).unwrap();
+        stream.start().unwrap();
+
+        let ten_ms = time::Duration::from_millis(10);
+
+        while let Ok(true) = stream.is_active() {thread::sleep(ten_ms);}
+    });
+
+    let ret = res.encode(env);
+    Ok(ret)
 }
