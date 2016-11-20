@@ -9,16 +9,22 @@ extern crate rustler;
 extern crate portaudio;
 
 use rustler::{ atom, NifEnv, NifTerm, NifResult, NifEncoder };
+use rustler::binary::NifBinary;
 use rustler::resource::ResourceCell;
 use portaudio as pa;
+
+use std::mem;
 use std::thread;
 use std::sync::mpsc::{channel, Sender};
 use std::time;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 mod synth;
 
-use synth::{Synth};
+use synth::{Synth, Osc, Wav};
 //abstract this away? please?
+use synth::SourceGraph;
 use synth::SourceGraph::*;
 use synth::Waveform::*;
 
@@ -36,17 +42,26 @@ rustler_export_nifs!(
     [
         ("init_resources", 0, init_resources),
         ("play_note", 5, play_note),
-        ("terminate", 1, terminate)
+        ("terminate", 1, terminate),
+        ("load_wav", 5, load_wav)
     ],
     Some(on_load)
 );
 
 enum SynthMsg {
     Note {
-        // instrument
+        instrument: String,
         start: u64, // sample position
         duration: u64, // in samples
         pitch: f32 // in Hz
+    },
+    Instrument {
+        name: String,
+        source: SourceGraph
+    },
+    Sample {
+        name: String,
+        data: Wav
     },
     Exit
 }
@@ -57,11 +72,14 @@ fn play_note<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>>
     let res: ResourceCell<Resource> = args[0].decode()?;
     let send = res.read().unwrap().sender.clone();
 
-    // ignore instrument for now
+    let instrument: String = args[1].decode()?;
     let start: u64 = args[2].decode()?;
     let pitch: f32 = args[3].decode()?;
     let duration: u64 = args[4].decode()?;
-    send.send(Note { start: start, pitch: pitch, duration: duration });
+    send.send(Note { instrument: instrument,
+                     start: start,
+                     pitch: pitch,
+                     duration: duration });
     Ok(atom::get_atom_init("ok").to_term(env))
 }
 
@@ -69,6 +87,28 @@ fn terminate<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>>
     let res: ResourceCell<Resource> = args[0].decode()?;
     let send = res.read().unwrap().sender.clone();
     send.send(Exit);
+    Ok(atom::get_atom_init("ok").to_term(env))
+}
+
+fn load_wav<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
+    unsafe {
+        let mut res: ResourceCell<Resource> = args[0].decode()?;
+        let name: String = args[1].decode()?;
+        let channels: u64 = args[2].decode()?;
+        let duration: u64 = args[3].decode()?;
+        let data1: NifBinary = args[4].decode()?;
+        let data0 = data1.as_slice();
+        let mut data = vec![0; data0.len() / 2];
+        for (idx, val)  in data.iter_mut().enumerate() {
+            let idx0 = idx * 2;
+            *val = mem::transmute::<[u8; 2], i16>([data0[idx0], data0[idx0+1]]);
+        }
+        let wav = Wav::new(channels as usize, duration as usize, data);
+        let send = res.read().unwrap().sender.clone();
+
+        send.send(Sample { name: name,
+                           data: wav });
+    }
     Ok(atom::get_atom_init("ok").to_term(env))
 }
 
@@ -85,6 +125,8 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
 
 
     let mut synth = Synth::new();
+    let mut instruments: HashMap<String, SourceGraph> = HashMap::new();
+    let mut samples: HashMap<String, Arc<Wav>> = HashMap::new();
 
     let callback =
         move|pa::OutputStreamCallbackArgs { buffer, frames, .. }| {
@@ -94,14 +136,26 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
             let mut exit = false;
             while let Ok(msg) = rx.try_recv() {
                 match msg {
-                    Note { start, duration, pitch } => {
-                        let sound: synth::Sound =
-                            synth::Sound::new(start, duration,
-                                              Osc{ waveform: Sine,
-                                                   frequency: pitch as f64,
-                                                   phase: 0.0
-                                              });
-                        synth.add_sound(sound)
+                    Note { ref instrument, start, duration, pitch } => {
+                        let sound =
+                            if let Some(inst) = instruments.get(instrument) {
+                                (*inst).clone()
+                            } else if let Some(samp) = samples.get(instrument) {
+                                Wave { started: synth.current_sample,
+                                       wav: samp.clone() }
+                            } else {
+                                Oscillator(
+                                    Osc {
+                                        waveform: Saw,
+                                        frequency: pitch as f64,
+                                        phase: 0.0
+                                    })
+                            };
+                        synth.add_sound(synth::Sound::new(start, duration, sound))
+                    },
+                    Instrument { .. } => continue,
+                    Sample { name, data } => {
+                        samples.insert(name, Arc::new(data));
                     },
                     Exit => exit = true
                 }

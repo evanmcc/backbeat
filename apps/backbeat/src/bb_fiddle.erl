@@ -22,10 +22,11 @@
 -define(S, #?RNAME).
 
 -record(?RNAME, {
-           pattern = [e, oe, e, oe, q, oq, h] :: [atom()],
+           pattern = [e, oe, e, oe, q, oq] :: [atom()],
            compiled_pat :: bb_pattern:pattern(),
+           instrument = <<>> :: binary(),
            bpm = 140 :: integer(),
-           pitch = 220.0 :: float(),
+           pitch = 160.0 :: float(),
            start_time = t() :: integer()
          }).
 
@@ -62,6 +63,18 @@ init([]) ->
     self() ! init,
     {ok, ?S{}}.
 
+handle_call({set_pattern, Pat}, _From, S) ->
+    {ok, CP} = bb_pattern:compile(Pat, S?S.instrument, S?S.pitch),
+    {reply, ok, S?S{compiled_pat = CP, pattern = Pat}};
+handle_call({set_bpm, BPM}, _From, S) ->
+    {reply, ok, S?S{bpm = BPM}};
+handle_call({set_pitch, Pitch}, _From,
+            ?S{compiled_pat = CP} = S) ->
+    CP1 = bb_pattern:set_pitch(CP, Pitch),
+    {reply, ok, S?S{pitch = Pitch, compiled_pat = CP1}};
+handle_call({set_instrument, Instrument}, _From, S) ->
+    {ok, CP1} = bb_pattern:compile(S?S.pattern, Instrument, S?S.pitch),
+    {reply, ok, S?S{compiled_pat = CP1, instrument = Instrument}};
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
     Reply = ok,
@@ -71,9 +84,11 @@ handle_cast(_Msg, State) ->
     lager:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(init, ?S{pattern = Pat, bpm = BPM, pitch = P} = S) ->
-    {ok, CP} = bb_pattern:compile(Pat, foo, P),
+handle_info(init, ?S{pattern = Pat, bpm = BPM,
+                     pitch = P, instrument = I} = S) ->
+    {ok, CP} = bb_pattern:compile(Pat, I, P),
     Duration = bb_pattern:duration(CP, BPM),
+    lager:debug("pattern duration: ~p", [Duration]),
     erlang:send_after(Duration, self(),
                       {pattern_start, t(), Duration},
                       []),
@@ -85,6 +100,7 @@ handle_info({pattern_start, StartTime, PatDuration},
     %% adjust this for tiny amounts of drift
     Duration = bb_pattern:duration(P, BPM),
     Adjust = (Now - StartTime) - PatDuration,
+    lager:debug("pattern duration: ~p", [Duration - Adjust]),
     erlang:send_after(Duration - Adjust, self(),
                       {pattern_start, Now, Duration},
                       []),

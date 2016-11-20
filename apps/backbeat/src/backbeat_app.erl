@@ -16,7 +16,10 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    'backbeat_sup':start_link().
+    lager:start(),
+    {ok, Pid} = backbeat_sup:start_link(),
+    ignored = bb_wav:load_sounds(),
+    {ok, Pid}.
 
 %%--------------------------------------------------------------------
 stop(_State) ->

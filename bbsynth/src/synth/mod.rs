@@ -1,37 +1,53 @@
 use std::collections::VecDeque;
 use std::f64::consts::PI;
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
+
+mod osc;
+
+pub use self::osc::Osc;
+pub use self::osc::Waveform;
+use self::osc::Waveform::*;
+//mod filter;
+
+mod wav;
+pub use self::wav::Wav;
+
+mod envelope;
+use self::envelope::Env;
+
+//mod effect;
 
 const SAMPLE_RATE: f64 = 44_100.0;
 const PI_2: f64 = PI * 2.0;
 const FREQ_RADIANS: f64 = PI_2 / SAMPLE_RATE;
 
 // shouldn't be public
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SourceGraph {
     // mixer creation should make sure that the sum of the levels is 1.0
     Mixer(Vec<(SourceGraph, f32)>),
-    Osc {
-        waveform: Waveform,
-        frequency: f64,
-        phase: f64
+    Wave{ wav: Arc<Wav>, // since we're single threaded & don't want to copy
+          started: u64 },
+    Oscillator(Osc),
+    Filter {
+        source: Box<SourceGraph>,
+        ftype: FilterType,
+        dline: [f32; 4]
     },
-    Wav {},
-    Filter(Box<SourceGraph>),
-    Envelope(Box<SourceGraph>),
+    Envelope(Env),
     Effect(Box<SourceGraph>)
 }
 
-#[derive(Debug)]
-pub enum Waveform {
-    Sine,
-    Saw,
-    Tri,
-    Square
+#[derive(Debug, Clone)]
+pub enum FilterType {
+    HighPass(f64),
+    LowPass(f64),
+    BandPass(f64),
+    BandReject(f64)
 }
 
-use self::Waveform::*;
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Sound {
     start_sample: u64,
     duration: u64,
@@ -43,6 +59,16 @@ pub enum SoundResult {
     Finished,
     Sample(f32),
     Err(String)
+}
+
+pub struct Knob<T> {
+    next: ValSource<T>,
+    last: T
+}
+
+pub enum ValSource<T> {
+    Chan(Receiver<T>),
+    LFO(Osc)
 }
 
 use self::SourceGraph::*;
@@ -73,6 +99,7 @@ impl Source for Sound {
     }
 }
 
+// add range of samples for efficiency?
 impl Source for SourceGraph {
     fn sample(&mut self, sample: u64) -> SoundResult {
         match *self {
@@ -86,23 +113,69 @@ impl Source for SourceGraph {
                     }).sum();
                 Sample(combined)
             },
-            Filter(ref mut source) => source.sample(sample),
+            Filter{ ref mut source, .. } => source.sample(sample),
             Envelope(ref mut source) => source.sample(sample),
             Effect(ref mut source) => source.sample(sample),
-            Wav {..} => Err("not yet implemented".to_string()),
-            Osc { ref waveform, frequency, ref mut phase } => {
-                match *waveform {
+            Wave{ ref wav, started } => {
+                let pos = sample - started;
+                if pos > wav.duration {
+                    Finished
+                } else {
+                    // hack for current monophony
+                    Sample(wav.samples[(pos*2) as usize])
+                }
+            }
+            Oscillator(ref mut osc) => {
+                match osc.waveform {
                     Sine => {
-                        let phase_inc = FREQ_RADIANS * frequency;
-                        let samp = phase.sin() as f32;
-                        *phase += phase_inc;
-                        if *phase >= PI_2 {
-                            *phase -= PI_2
+                        let phase_inc = FREQ_RADIANS * osc.frequency;
+                        let samp = osc.phase.sin() as f32;
+                        osc.phase += phase_inc;
+                        if osc.phase >= PI_2 {
+                            osc.phase -= PI_2
                         }
-                        // println!("sample {} {} {} ", sample, samp, phase);
+                        // println!("sample {} {} {} ", sample, samp, osc.phase);
                         Sample(samp)
                     },
-                    _ => Sample(0.0)
+                    Saw => {
+                        let phase_inc = FREQ_RADIANS * osc.frequency;
+                        let samp = ((osc.phase / PI) - 1.0) as f32;
+                        osc.phase += phase_inc;
+                        if osc.phase >= PI_2 {
+                            osc.phase -= PI_2
+                        }
+                        Sample(samp)
+                    }
+                    Tri => {
+                        let phase_inc = FREQ_RADIANS * osc.frequency;
+                        let mut tri_imdt = (osc.phase * (2.0 / PI)) as f32;
+                        if osc.phase < 0.0 {
+                            tri_imdt += 1.0
+                        } else {
+                            tri_imdt = 1.0 - tri_imdt
+                        }
+                        osc.phase += phase_inc;
+                        if osc.phase >= PI {
+                            osc.phase -= PI_2
+                        }
+                        Sample(tri_imdt)
+                    }
+                    Square => {
+                        let sample_time = 1.0 / SAMPLE_RATE;
+                        let period = 1.0 / osc.frequency;
+                        let midpoint = period * 0.5;
+                        let mut samp: f32;
+                        if osc.phase < midpoint {
+                            samp = 1.0
+                        } else {
+                            samp = -1.0
+                        }
+                        osc.phase += sample_time;
+                        if osc.phase >= period {
+                            osc.phase -= period
+                        }
+                        Sample(samp)
+                    }
                 }
             }
         }
@@ -110,7 +183,7 @@ impl Source for SourceGraph {
 }
 
 pub struct Synth {
-    current_sample: u64,
+    pub current_sample: u64,
     // sorted by sample start, so we can break iteration when we hit a
     // sample start that's in the future.
     sounds: VecDeque<Sound>,

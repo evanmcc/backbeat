@@ -6,7 +6,8 @@
 -export([
          start_link/0,
          terminate/0,
-         play_note/3
+         play_note/3,
+         load_wav/4
         ]).
 
 %% gen_server callbacks
@@ -34,6 +35,9 @@ terminate() ->
 play_note(Instrument, Pitch, Duration) ->
     gen_server:call(?MODULE, {play_note, Instrument, Pitch, Duration}).
 
+load_wav(Name, Channels, Duration, Data) ->
+    gen_server:call(?MODULE, {load_wav, Name, Channels, Duration, Data}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -53,6 +57,10 @@ handle_call({play_note, Instrument, Pitch, Duration}, _From,
     Start = (erlang:monotonic_time(micro_seconds) - Origin) *
         (44100 / 1000000),
     Ret = play_note(Res,  Instrument, trunc(Start), Pitch, Duration),
+    {reply, Ret, S};
+handle_call({load_wav, Name, Channels, Duration, Data}, _From,
+            #state{nif_resource = Res} = S) ->
+    Ret = load_wav(Res, list_to_binary(Name), Channels, Duration, Data),
     {reply, Ret, S};
 
 handle_call(_Request, _From, State) ->
@@ -87,3 +95,7 @@ terminate(_Resource) ->
 
 play_note(_Res, _Instrument, _Start, _Pitch, _Duration) ->
     erlang:nif_error("nif not loaded").
+
+load_wav(_Res, _Name, _Channels, _Duration, _Data) ->
+    erlang:nif_error("nif not loaded").
+

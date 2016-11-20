@@ -40,32 +40,45 @@ duration(#pattern{}, BPM) ->
     beat_ms(BPM) * 4.
 
 schedule(#pattern{pat = P}, BPM, Target) ->
-    L = length(P) - 1,
-    NoteLen = beat_ms(BPM),
-    _ = [begin
-             Time = Pos * NoteLen,
-             Duration = note_len(Note, BPM),
-             erlang:send_after(Time, Target,
-                               {note, Instrument, Pitch, Duration},
-                               [])
-         end
-        || {{Note, Instrument, Pitch}, Pos} <- lists:zip(P, lists:seq(0, L))].
+    schedule(P, BPM, Target, 0).
+
+schedule([], _, _, _) ->
+    ok;
+schedule([{Note, Instrument, Pitch}|T], BPM, Target, Time) ->
+    {Ms, Samples} = note_len(Note, BPM),
+    lager:debug("time=~p, duration=~p", [Time, Samples]),
+    case is_rest(Note) of
+        true ->
+            ok;
+        _ ->
+            erlang:send_after(Time, Target,
+                              {note, Instrument, Pitch, Samples},
+                              [])
+    end,
+    schedule(T, BPM, Target, Time + Ms).
+
+
 
 note_len(Note, BPM) when Note == s;
                          Note == os ->
-    trunc(beat_sa(BPM) / 4);
+    {trunc(beat_ms(BPM) / 4),
+     trunc(beat_sa(BPM) / 4)};
 note_len(Note, BPM) when Note == e;
                          Note == oe ->
-    trunc(beat_sa(BPM) / 2);
+    {trunc(beat_ms(BPM) / 2),
+     trunc(beat_sa(BPM) / 2)};
 note_len(Note, BPM) when Note == q;
                          Note == oq ->
-    beat_sa(BPM);
+    {beat_ms(BPM),
+     beat_sa(BPM)};
 note_len(Note, BPM) when Note == h;
                          Note == oh ->
-    beat_sa(BPM) * 2;
+    {beat_ms(BPM) * 2,
+     beat_sa(BPM) * 2};
 note_len(Note, BPM) when Note == w;
                          Note == ow ->
-    beat_sa(BPM) * 4.
+    {beat_ms(BPM) * 4,
+     beat_sa(BPM) * 4}.
 
 beat_sa(BPM) ->
     BPS = BPM / 60,
@@ -74,3 +87,19 @@ beat_sa(BPM) ->
 beat_ms(BPM) ->
     BPS = BPM / 60,
     trunc(1000 / BPS).
+
+is_rest(o) ->
+    true;
+is_rest(os) ->
+    true;
+is_rest(oe) ->
+    true;
+is_rest(oq) ->
+    true;
+is_rest(oh) ->
+    true;
+is_rest(ow) ->
+    true;
+is_rest(_) ->
+    false.
+
