@@ -22,11 +22,12 @@ use std::sync::Arc;
 
 mod synth;
 
-use synth::{Synth, Osc, Wav};
+use synth::{Synth, Osc, Wav, Filt};
 //abstract this away? please?
 use synth::SourceGraph;
 use synth::SourceGraph::*;
 use synth::Waveform::*;
+use synth::FilterType::*;
 
 const SAMPLE_HZ: f64 = 44_100.0;
 const CHANNELS: i32 = 2;
@@ -144,12 +145,19 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
                                 Wave { started: synth.current_sample,
                                        wav: samp.clone() }
                             } else {
-                                Oscillator(
+                                Filter( Filt {
+                                    source: Box::new(Oscillator(
                                     Osc {
                                         waveform: Saw,
                                         frequency: pitch as f64,
                                         phase: 0.0
-                                    })
+                                    })),
+                                    ftype: Highpass(100.0),
+                                    delay_in1: 0.0,
+                                    delay_in2: 0.0,
+                                    delay_out1: 0.0,
+                                    delay_out2: 0.0
+                                })
                             };
                         synth.add_sound(synth::Sound::new(start, duration, sound))
                     },

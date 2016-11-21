@@ -1,0 +1,14 @@
+%% -*- erlang -*-
+
+{buzz, #{type => mixer,
+         val => [{#{type => oscillator,
+                    waveform => noise},
+                   0.1},
+                 {#{type => filter,
+                    source => #{type => oscillator,
+                                waveform => saw},
+                    ftype => {lowpass, 220}
+                   },
+                  0.9}
+                ]}
+}.

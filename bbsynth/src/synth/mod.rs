@@ -8,7 +8,10 @@ mod osc;
 pub use self::osc::Osc;
 pub use self::osc::Waveform;
 use self::osc::Waveform::*;
-//mod filter;
+
+mod filter;
+pub use self::filter::Filt;
+pub use self::filter::FilterType;
 
 mod wav;
 pub use self::wav::Wav;
@@ -21,6 +24,7 @@ use self::envelope::Env;
 const SAMPLE_RATE: f64 = 44_100.0;
 const PI_2: f64 = PI * 2.0;
 const FREQ_RADIANS: f64 = PI_2 / SAMPLE_RATE;
+const CHANNELS: usize = 2;
 
 // shouldn't be public
 #[derive(Debug, Clone)]
@@ -30,21 +34,9 @@ pub enum SourceGraph {
     Wave{ wav: Arc<Wav>, // since we're single threaded & don't want to copy
           started: u64 },
     Oscillator(Osc),
-    Filter {
-        source: Box<SourceGraph>,
-        ftype: FilterType,
-        dline: [f32; 4]
-    },
+    Filter(Filt),
     Envelope(Env),
     Effect(Box<SourceGraph>)
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterType {
-    HighPass(f64),
-    LowPass(f64),
-    BandPass(f64),
-    BandReject(f64)
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +105,14 @@ impl Source for SourceGraph {
                     }).sum();
                 Sample(combined)
             },
-            Filter{ ref mut source, .. } => source.sample(sample),
+            Filter(ref mut f) => {
+                match f.source.sample(sample) {
+                    Sample(s) => {
+                        Sample(f.butterworth(s))
+                    },
+                    other => other
+                }
+            }
             Envelope(ref mut source) => source.sample(sample),
             Effect(ref mut source) => source.sample(sample),
             Wave{ ref wav, started } => {
