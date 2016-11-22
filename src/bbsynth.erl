@@ -7,7 +7,8 @@
          start_link/0,
          terminate/0,
          play_note/3,
-         load_wav/4
+         load_wav/4,
+         twiddle/2
         ]).
 
 %% gen_server callbacks
@@ -38,6 +39,9 @@ play_note(Instrument, Pitch, Duration) ->
 load_wav(Name, Channels, Duration, Data) ->
     gen_server:call(?MODULE, {load_wav, Name, Channels, Duration, Data}).
 
+twiddle(Name, Value) ->
+    gen_server:call(?MODULE, {twiddle, Name, Value}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -62,6 +66,10 @@ handle_call({load_wav, Name, Channels, Duration, Data}, _From,
             #state{nif_resource = Res} = S) ->
     Ret = load_wav(Res, list_to_binary(Name), Channels, Duration, Data),
     {reply, Ret, S};
+handle_call({twiddle, Name, Value}, _From,
+            #state{nif_resource = Res} = S) ->
+    Ret = twiddle(Res, iolist_to_binary(Name), Value),
+    {reply, {ok, Ret}, S};
 
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),
@@ -99,3 +107,5 @@ play_note(_Res, _Instrument, _Start, _Pitch, _Duration) ->
 load_wav(_Res, _Name, _Channels, _Duration, _Data) ->
     erlang:nif_error("nif not loaded").
 
+twiddle(_Res, _Name, _Value) ->
+    erlang:nif_error("nif not loaded").

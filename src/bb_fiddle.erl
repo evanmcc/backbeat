@@ -68,9 +68,8 @@ handle_call({set_pattern, Pat}, _From, S) ->
     {reply, ok, S?S{compiled_pat = CP, pattern = Pat}};
 handle_call({set_bpm, BPM}, _From, S) ->
     {reply, ok, S?S{bpm = BPM}};
-handle_call({set_pitch, Pitch}, _From,
-            ?S{compiled_pat = CP} = S) ->
-    CP1 = bb_pattern:set_pitch(CP, Pitch),
+handle_call({set_pitch, Pitch}, _From, S) ->
+    {ok, CP1} = bb_pattern:compile(S?S.pattern, S?S.instrument, Pitch),
     {reply, ok, S?S{pitch = Pitch, compiled_pat = CP1}};
 handle_call({set_instrument, Instrument}, _From, S) ->
     {ok, CP1} = bb_pattern:compile(S?S.pattern, Instrument, S?S.pitch),

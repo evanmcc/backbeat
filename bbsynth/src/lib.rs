@@ -18,11 +18,11 @@ use std::thread;
 use std::sync::mpsc::{channel, Sender};
 use std::time;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{RwLock, Arc};
 
 mod synth;
 
-use synth::{Synth, Osc, Wav, Filt};
+use synth::{Synth, Osc, Wav, Filt, Knob};
 //abstract this away? please?
 use synth::SourceGraph;
 use synth::SourceGraph::*;
@@ -35,7 +35,8 @@ const FRAMES: u32 = 128;
 
 #[NifResource]
 struct Resource {
-    sender: Sender<SynthMsg>
+    sender: Sender<SynthMsg>,
+    knobs: HashMap<String, Arc<RwLock<f64>>>
 }
 
 rustler_export_nifs!(
@@ -44,7 +45,8 @@ rustler_export_nifs!(
         ("init_resources", 0, init_resources),
         ("play_note", 5, play_note),
         ("terminate", 1, terminate),
-        ("load_wav", 5, load_wav)
+        ("load_wav", 5, load_wav),
+        ("twiddle", 3, twiddle)
     ],
     Some(on_load)
 );
@@ -68,6 +70,18 @@ enum SynthMsg {
 }
 
 use SynthMsg::*;
+
+fn twiddle<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
+    let res: ResourceCell<Resource> = args[0].decode()?;
+    let name: String = args[1].decode()?;
+    let new_val: f64 = args[2].decode()?;
+    let ref knobs = res.read().unwrap().knobs;
+    let knob = knobs.get(&name).unwrap();
+    let mut k = knob.write().unwrap();
+    let old_val = *k;
+    *k = new_val;
+    Ok(old_val.encode(env))
+}
 
 fn play_note<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
     let res: ResourceCell<Resource> = args[0].decode()?;
@@ -120,10 +134,15 @@ fn on_load(env: &NifEnv, load_info: NifTerm) -> bool {
 
 fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm<'a>> {
     let (tx, rx) = channel::<SynthMsg>();
-    let res = ResourceCell::new(Resource {
-        sender: tx
+    let mut res = ResourceCell::new(Resource {
+        sender: tx,
+        knobs: HashMap::new()
     });
 
+    let knob = Knob::new_remote(500.0, 100000.0, 0.0);
+    if let Knob::Remote { remote, ..} = knob.clone() {
+        res.write().unwrap().knobs.insert("default".to_string(), remote.clone());
+    }
 
     let mut synth = Synth::new();
     let mut instruments: HashMap<String, SourceGraph> = HashMap::new();
@@ -135,6 +154,7 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
             // get any messages that might be waiting, but not too many
             let mut limit = 100;
             let mut exit = false;
+
             while let Ok(msg) = rx.try_recv() {
                 match msg {
                     Note { ref instrument, start, duration, pitch } => {
@@ -152,7 +172,7 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
                                         frequency: pitch as f64,
                                         phase: 0.0
                                     })),
-                                    ftype: Highpass(100.0),
+                                    ftype: Lowpass(knob.clone()),
                                     delay_in1: 0.0,
                                     delay_in2: 0.0,
                                     delay_out1: 0.0,
@@ -186,6 +206,7 @@ fn init_resources<'a>(env: &'a NifEnv, args: &Vec<NifTerm>) -> NifResult<NifTerm
                 pa::Complete
             }
         };
+
     thread::spawn(move || {
         let pa = pa::PortAudio::new().unwrap();
         let settings = pa.default_output_stream_settings::<f32>(CHANNELS,

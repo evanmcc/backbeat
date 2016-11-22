@@ -19,6 +19,9 @@ pub use self::wav::Wav;
 mod envelope;
 use self::envelope::Env;
 
+mod knob;
+pub use self::knob::Knob;
+
 //mod effect;
 
 const SAMPLE_RATE: f64 = 44_100.0;
@@ -51,16 +54,6 @@ pub enum SoundResult {
     Finished,
     Sample(f32),
     Err(String)
-}
-
-pub struct Knob<T> {
-    next: ValSource<T>,
-    last: T
-}
-
-pub enum ValSource<T> {
-    Chan(Receiver<T>),
-    LFO(Osc)
 }
 
 use self::SourceGraph::*;
@@ -108,7 +101,7 @@ impl Source for SourceGraph {
             Filter(ref mut f) => {
                 match f.source.sample(sample) {
                     Sample(s) => {
-                        Sample(f.butterworth(s))
+                        Sample(f.butterworth(sample, s))
                     },
                     other => other
                 }
@@ -125,57 +118,7 @@ impl Source for SourceGraph {
                 }
             }
             Oscillator(ref mut osc) => {
-                match osc.waveform {
-                    Sine => {
-                        let phase_inc = FREQ_RADIANS * osc.frequency;
-                        let samp = osc.phase.sin() as f32;
-                        osc.phase += phase_inc;
-                        if osc.phase >= PI_2 {
-                            osc.phase -= PI_2
-                        }
-                        // println!("sample {} {} {} ", sample, samp, osc.phase);
-                        Sample(samp)
-                    },
-                    Saw => {
-                        let phase_inc = FREQ_RADIANS * osc.frequency;
-                        let samp = ((osc.phase / PI) - 1.0) as f32;
-                        osc.phase += phase_inc;
-                        if osc.phase >= PI_2 {
-                            osc.phase -= PI_2
-                        }
-                        Sample(samp)
-                    }
-                    Tri => {
-                        let phase_inc = FREQ_RADIANS * osc.frequency;
-                        let mut tri_imdt = (osc.phase * (2.0 / PI)) as f32;
-                        if osc.phase < 0.0 {
-                            tri_imdt += 1.0
-                        } else {
-                            tri_imdt = 1.0 - tri_imdt
-                        }
-                        osc.phase += phase_inc;
-                        if osc.phase >= PI {
-                            osc.phase -= PI_2
-                        }
-                        Sample(tri_imdt)
-                    }
-                    Square => {
-                        let sample_time = 1.0 / SAMPLE_RATE;
-                        let period = 1.0 / osc.frequency;
-                        let midpoint = period * 0.5;
-                        let mut samp: f32;
-                        if osc.phase < midpoint {
-                            samp = 1.0
-                        } else {
-                            samp = -1.0
-                        }
-                        osc.phase += sample_time;
-                        if osc.phase >= period {
-                            osc.phase -= period
-                        }
-                        Sample(samp)
-                    }
-                }
+                osc.sample(sample)
             }
         }
     }
