@@ -13,3 +13,4 @@ rustler = { git = 'https://github.com/evanmcc/rustler' }
 rustler_codegen = { git = 'https://github.com/evanmcc/rustler' }
 portaudio = "0.7.0"
 lazy_static = "0.1.16"
+rand = "0.3.15"

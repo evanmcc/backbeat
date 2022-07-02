@@ -26,7 +26,7 @@
            compiled_pat :: bb_pattern:pattern(),
            instrument = <<>> :: binary(),
            bpm = 140 :: integer(),
-           pitch = 160.0 :: float(),
+           pitch = 120.0 :: float(),
            start_time = t() :: integer()
          }).
 

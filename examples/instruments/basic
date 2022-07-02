@@ -1,14 +1,19 @@
 %% -*- erlang -*-
 
-{buzz, #{type => mixer,
-         val => [{#{type => oscillator,
-                    waveform => noise},
-                   0.1},
-                 {#{type => filter,
-                    source => #{type => oscillator,
-                                waveform => saw},
-                    ftype => {lowpass, 220}
-                   },
-                  0.9}
-                ]}
+{<<"buzz">>,
+ #{type => <<"mixer">>,
+   sources => [{#{type => <<"oscillator">>,
+                  waveform => <<"noise">>},
+                0.1},
+               {#{type => filter,
+                  source => #{type => <<"osc">>,
+                              waveform => <<"saw">>,
+                              knob => {<<"trigger">>}
+                             },
+                  ftype => <<"lowpass">>,
+                  fknob => {<<"remote">>, <<"buzz-filt-freq">>,
+                            22100.0, 0.0}
+                 },
+                0.9}
+              ]}
 }.

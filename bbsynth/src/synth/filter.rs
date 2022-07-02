@@ -5,6 +5,7 @@ use ::synth::SAMPLE_RATE;
 use ::synth::PI_2;
 use ::synth::SourceGraph;
 use ::synth::Knob;
+use ::synth::Knob::*;
 
 use std::f64::consts::PI;
 use std::sync::Arc;
@@ -31,6 +32,26 @@ pub enum FilterType {
 use self::FilterType::*;
 
 impl Filt {
+
+    pub fn new(mut s: SourceGraph, f: FilterType) -> Filt {
+        match f {
+            Highpass(ref k) | Lowpass(ref k) | Bandpass(ref k) => {
+                match *k {
+                    Trigger => panic!("triggers not allowed on filter knobs"),
+                    _ => ()
+                }
+            }
+        }
+        Filt {
+            source: Box::new(s),
+            ftype: f,
+            delay_in1: 0.0,
+            delay_in2: 0.0,
+            delay_out1: 0.0,
+            delay_out2: 0.0
+        }
+    }
+
     pub fn butterworth(&mut self, sample: u64, in_sample: f32) -> f32 {
         let mut amp_in0: f64;
         let mut amp_in1: f64;

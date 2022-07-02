@@ -1,3 +1,5 @@
+extern crate rand;
+
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::sync::mpsc::{channel, Receiver};
@@ -64,12 +66,12 @@ trait Source {
 }
 
 impl Sound {
-    pub fn new(start: u64, dur:u64, sources: SourceGraph)
+    pub fn new(start: u64, dur:u64, pitch: f64, sources: SourceGraph)
            -> Sound {
         Sound {
             start_sample: start,
             duration: dur,
-            source_tree: sources
+            source_tree: sources.make(pitch)
         }
     }
 }
@@ -124,6 +126,43 @@ impl Source for SourceGraph {
     }
 }
 
+impl SourceGraph {
+    pub fn triggers(&self) -> u64 {
+        match *self {
+            Mixer(ref vec) => vec.iter().map(|&(ref s, _)| s.triggers()).sum(),
+            Oscillator(ref o) => o.triggers(),
+            Filter(ref f) => f.source.triggers(),
+            Wave {..} => 0, // eventually some will likely be allowed here
+            Effect(_) => 0,
+            Envelope(_) => 0 // eventually some here too
+        }
+
+    }
+
+    fn make(&self, pitch: f64) -> SourceGraph {
+        if !(self.triggers() <= 1) {
+            panic!("illegal number of triggers in instrument")
+        }
+        self.make_rec(pitch)
+    }
+
+    fn make_rec(&self, pitch: f64) -> SourceGraph {
+        match *self {
+            Mixer(ref vec) => {
+                Mixer(vec.into_iter()
+                      .map(|&(ref s, l)| (s.make_rec(pitch), l))
+                      .collect())
+            },
+            Oscillator(ref o) => Oscillator(o.make_rec(pitch)),
+            Filter(ref f) => Filter(Filt{source: Box::new(f.source.make_rec(pitch)),
+                                         .. f.clone()}),
+            Wave {..} => self.clone(), // eventually relevant here too
+            Effect(_) => self.clone(),
+            Envelope(_) => self.clone() // here too etc
+        }
+    }
+
+}
 pub struct Synth {
     pub current_sample: u64,
     // sorted by sample start, so we can break iteration when we hit a
@@ -139,7 +178,7 @@ impl Synth {
         }
     }
 
-    pub fn add_sound(& mut self, sound: Sound) {
+    pub fn add_sound(&mut self, sound: Sound) {
         //println!("adding sound");
         self.sounds.push_back(sound)
     }
@@ -170,4 +209,6 @@ impl Synth {
         self.current_sample += 1;
         (samp_acc, samp_acc)
     }
+
+    //fn create_instrument()
 }

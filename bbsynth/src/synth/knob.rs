@@ -4,6 +4,7 @@ use ::synth::SoundResult::*;
 
 #[derive(Debug, Clone)]
 pub enum Knob {
+    Trigger,
     Fixed(f64),
     LFO(Osc),
     FixedLFO {
@@ -11,6 +12,7 @@ pub enum Knob {
         lfo: Osc
     },
     Remote {
+        name: String,
         remote: Arc<RwLock<f64>>,
         upper_limit: f64,
         lower_limit: f64
@@ -20,11 +22,12 @@ pub enum Knob {
 use self::Knob::*;
 
 impl Knob {
-    pub fn new_remote(initial: f64, upper: f64, lower: f64) -> Knob {
+    pub fn new_remote(name: String, initial: f64, upper: f64, lower: f64) -> Knob {
         Remote {
-             remote: Arc::new(RwLock::new(initial)),
-             upper_limit: upper,
-             lower_limit: lower
+            name: name,
+            remote: Arc::new(RwLock::new(initial)),
+            upper_limit: upper,
+            lower_limit: lower
         }
     }
 
@@ -45,7 +48,8 @@ impl Knob {
                 } else {
                     center
                 }
-            }
+            },
+            Trigger => panic!("this should never happen")
         }
     }
 }

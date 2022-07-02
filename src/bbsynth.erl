@@ -8,7 +8,8 @@
          terminate/0,
          play_note/3,
          load_wav/4,
-         twiddle/2
+         twiddle/2,
+         create_instrument/2
         ]).
 
 %% gen_server callbacks
@@ -42,6 +43,9 @@ load_wav(Name, Channels, Duration, Data) ->
 twiddle(Name, Value) ->
     gen_server:call(?MODULE, {twiddle, Name, Value}).
 
+create_instrument(Name, Inst) ->
+    gen_server:call(?MODULE, {create_instrument, Name, Inst}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -69,6 +73,11 @@ handle_call({load_wav, Name, Channels, Duration, Data}, _From,
 handle_call({twiddle, Name, Value}, _From,
             #state{nif_resource = Res} = S) ->
     Ret = twiddle(Res, iolist_to_binary(Name), Value),
+    {reply, {ok, Ret}, S};
+handle_call({create_instrument, Name, Inst}, _From,
+            #state{nif_resource = Res} = S) ->
+    %% eventually this will return a list of knob names
+    Ret = create_instrument(Res, iolist_to_binary(Name), Inst),
     {reply, {ok, Ret}, S};
 
 handle_call(_Request, _From, State) ->
@@ -108,4 +117,7 @@ load_wav(_Res, _Name, _Channels, _Duration, _Data) ->
     erlang:nif_error("nif not loaded").
 
 twiddle(_Res, _Name, _Value) ->
+    erlang:nif_error("nif not loaded").
+
+create_instrument(_Res, _Name, _Inst) ->
     erlang:nif_error("nif not loaded").

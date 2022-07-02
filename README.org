@@ -1,15 +1,21 @@
 #+Title: BACKBEAT
 * purpose
 backbeat is a simple system for the composition of electronic music for offline composition, and eventually live performance.
-* todo [2/9]
+* todo [5/14]
 - [ ] simple envelopes
-- [ ] filters
-- [ ] instrument creation
-  - [ ] dynamic knobs
+- [ ] better pattern UI
+- [ ] better fiddle with multiple patterns
+- [ ] simple FM synthesis
+- [ ] more advanced FM synthesis
+- [X] filters
+- [-] instrument creation
+  - [X] dynamic knobs
+  - [ ] instrument design
 - [X] pattern fiddle
 - [X] more oscillators
 - [ ] tests
-- [ ] wav loading (erlang)
-- [ ] wav playing (rust)
+- [X] wav loading (erlang)
+- [X] wav playing (rust)
 - [ ] wavetable oscillators
   - [ ] benchmarks against direct calculation oscillators
+- [ ] wav output at faster than real time
